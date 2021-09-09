@@ -91,25 +91,32 @@ run_misty <- function(views, results.folder = "results", seed = 42,
     rlist::list.remove(c("misty.uniqueid")) %>%
     purrr::map_chr(~ .x[["abbrev"]])
 
-  # Generate header for what?
+  # Generate header for what the coefficient file, containing the
+  # coefficient from the linear meta model
   header <- stringr::str_glue("target intercept {views} p.intercept {p.views}",
     views = paste0(view.abbrev, collapse = " "),
     p.views = paste0("p.", view.abbrev, collapse = " "),
     .sep = " "
   )
 
+  #  Extract the expression values from the intraview (aka baseline model)
   expr <- views[["intraview"]][["data"]]
 
+  # Check whether we actually have more samples (aka spots/cells) than cv folds
   assertthat::assert_that(nrow(expr) >= cv.folds,
     msg = "The data has less rows than the requested number of cv folds."
   )
 
+  # Bypass intra was implemented if we do not want to include the intramodel,
+  # which could be the case if we only have a single target in a cell
+  # (thus there would be no predictors left).
   if(nrow(expr) == 1) bypass.intra <- TRUE
   
   # Get the standard deviation for each target
   target.var <- apply(expr, 2, stats::sd)
 
-  # If any targets have no variance, output a warning
+  # If any targets have no variance, output a warning (in this case the modeling
+  # would be kinda unnecessary, simply mean=intercept, slope=0 for linear model)
   if (any(target.var == 0)) {
     warning.message <- paste(
       "Targets",
@@ -121,7 +128,8 @@ run_misty <- function(views, results.folder = "results", seed = 42,
     warning(warning.message)
   }
 
-  # What are those coef.file and coef.lock variables supposed to do?
+  # Now we create the filenames for the txt file that contain the meta model
+  # coefficients and the filename for the lock.file
   coef.file <- paste0(
     normalized.results.folder, .Platform$file.sep,
     "coefficients.txt"
@@ -132,12 +140,14 @@ run_misty <- function(views, results.folder = "results", seed = 42,
   )
   on.exit(file.remove(coef.lock), add = TRUE)
 
+  # If append is FALSE, simply write/overwrite file with header
   if (!append) {
     current.lock <- filelock::lock(coef.lock)
     write(header, file = coef.file)
     filelock::unlock(current.lock)
   }
 
+  # Now we will do the same thing for the file that contains there performance measures
   header <- "target intra.RMSE intra.R2 multi.RMSE multi.R2 p.RMSE p.R2"
 
   perf.file <- paste0(
@@ -156,6 +166,7 @@ run_misty <- function(views, results.folder = "results", seed = 42,
     filelock::unlock(current.lock)
   }
 
+  # Check which targets should be predicted
   targets <- switch(class(target.subset),
     # if numbers are supplied use the indexed targets
     "numeric" = colnames(expr)[target.subset],
@@ -167,10 +178,9 @@ run_misty <- function(views, results.folder = "results", seed = 42,
     NULL
   )
 
-  # here we build the model for each target
-  # See models.R for details how it works
   message("\nTraining models")
   
+  # Building the model for each target (see models.R for details)
   targets %>% furrr::future_map_chr(function(target, ...) {
     target.model <- build_model(
       views, target, bypass.intra,
@@ -179,21 +189,28 @@ run_misty <- function(views, results.folder = "results", seed = 42,
 
     # After building and training the model, we basically need to extract
     # all the interesting information/data
+    
+    # 1. The build, trained, and evaluated meta model
     combined.views <- target.model[["meta.model"]]
-
     model.summary <- summary(combined.views)
 
+    # 2. The coefficients of that meta model
     # coefficient values and p-values
     # WARNING: hardcoded column index
     coeff <- c(model.summary$coefficients[, 1], model.summary$coefficients[, 4])
 
+    # Write to file as specified above, use filelock system to prevent
+    # simultaneous access from different processes (only process which 
+    # has the lock can proceed with writing, other processes have to wait)
     current.lock <- filelock::lock(coef.lock)
     write(paste(target, paste(coeff, collapse = " ")),
       file = coef.file, append = TRUE
     )
     filelock::unlock(current.lock)
 
-    # raw importances
+    # 3. The importances of each predictor in each model
+    # extract the importances as returned by the ranger random forest implementation
+    # TODO: What are those importances actually?
     target.model[["model.views"]] %>% purrr::walk2(
       view.abbrev,
       function(model.view, abbrev) {
@@ -204,7 +221,8 @@ run_misty <- function(views, results.folder = "results", seed = 42,
           target = targets,
           imp = model.view.imps
         )
-
+        
+        # Write tibble to csv
         readr::write_csv(
           imps,
           paste0(
@@ -215,7 +233,9 @@ run_misty <- function(views, results.folder = "results", seed = 42,
       }
     )
 
-    # performance
+    # 4. The performance measures of the baseline linear model (based on intraview)
+    # and the meta linear model (based on all views)
+    # Output warning if negative performance measures detected
     if (sum(target.model[["performance.estimate"]] < 0) > 0) {
       warning.message <-
         paste(
@@ -225,15 +245,21 @@ run_misty <- function(views, results.folder = "results", seed = 42,
       warning(warning.message)
     }
 
+    # 4. a) Replace all negative values by 0
     performance.estimate <- target.model[["performance.estimate"]] %>%
       dplyr::mutate_if(~ sum(. < 0) > 0, ~ pmax(., 0))
+    
+    # 4. b) Perform ttest for the RMSE from baseline model and multiview model
     performance.summary <- c(
       performance.estimate %>% colMeans(),
       tryCatch(stats::t.test(performance.estimate %>%
         dplyr::pull(.data$intra.RMSE),
       performance.estimate %>%
         dplyr::pull(.data$multi.RMSE),
+      # if multiview model explains more variability of the data, then
+      # RMSE should be smaller, thus our alternative is greater
       alternative = "greater"
+      # and extract p.value
       )$p.value, error = function(e) {
         warning.message <- paste(
           "t-test of RMSE performance failed with error:",
@@ -242,10 +268,13 @@ run_misty <- function(views, results.folder = "results", seed = 42,
         warning(warning.message)
         1
       }),
+      # 4. b) Perform ttest for the R2 from baseline model and multiview model
       tryCatch(stats::t.test(performance.estimate %>%
         dplyr::pull(.data$intra.R2),
       performance.estimate %>%
         dplyr::pull(.data$multi.R2),
+      # if multiview model explains more variability of the data, then
+      # R2 should be greater, thus our alternative is less
       alternative = "less"
       )$p.value, error = function(e) {
         warning.message <- paste(
