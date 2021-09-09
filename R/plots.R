@@ -34,7 +34,8 @@ plot_improvement_stats <- function(misty.results, measure = "gain.R2", trim = -I
     msg = "The provided result list is malformed. Consider using collect_results()."
   )
 
-  inv <- sign((stringr::str_detect(measure, "gain") |
+  # What is this chunk of code doing? for me it always returns true
+  inv <- sign( (stringr::str_detect(measure, "gain") |
     stringr::str_detect(measure, "RMSE", negate = TRUE)) - 0.5)
 
   plot.data <- misty.results$improvements.stats %>%

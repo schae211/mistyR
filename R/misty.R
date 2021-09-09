@@ -23,8 +23,10 @@ dplyr::`%>%`
 #' If \code{bypass.intra} is set to \code{TRUE} all variable in the intraview
 #' the intraview data will be treated as targets only. The baseline intraview
 #' model in this case is a trivial model that predicts the average of each
-#' target. If the intraview has only one variable this switch is automatically
-#' set to \code{TRUE}.
+#' target "(basically just an intercept with no slope"). 
+#' If the intraview has only one variable this switch is automatically
+#' set to \code{TRUE}. Which makes sense, since there would not be any predictors
+#' available for the intraview
 #'
 #' Default values passed to \code{\link[ranger]{ranger}()} for training the
 #' view-specific models: \code{num.trees = 100}, \code{importance = "impurity"},
@@ -84,11 +86,12 @@ run_misty <- function(views, results.folder = "results", seed = 42,
 
   on.exit(sweep_cache())
 
+  # Generate a vector to get all view abbreviations
   view.abbrev <- views %>%
     rlist::list.remove(c("misty.uniqueid")) %>%
     purrr::map_chr(~ .x[["abbrev"]])
 
-
+  # Generate header for what?
   header <- stringr::str_glue("target intercept {views} p.intercept {p.views}",
     views = paste0(view.abbrev, collapse = " "),
     p.views = paste0("p.", view.abbrev, collapse = " "),
@@ -103,8 +106,10 @@ run_misty <- function(views, results.folder = "results", seed = 42,
 
   if(nrow(expr) == 1) bypass.intra <- TRUE
   
+  # Get the standard deviation for each target
   target.var <- apply(expr, 2, stats::sd)
 
+  # If any targets have no variance, output a warning
   if (any(target.var == 0)) {
     warning.message <- paste(
       "Targets",
@@ -116,6 +121,7 @@ run_misty <- function(views, results.folder = "results", seed = 42,
     warning(warning.message)
   }
 
+  # What are those coef.file and coef.lock variables supposed to do?
   coef.file <- paste0(
     normalized.results.folder, .Platform$file.sep,
     "coefficients.txt"
@@ -151,20 +157,28 @@ run_misty <- function(views, results.folder = "results", seed = 42,
   }
 
   targets <- switch(class(target.subset),
+    # if numbers are supplied use the indexed targets
     "numeric" = colnames(expr)[target.subset],
     "integer" = colnames(expr)[target.subset],
+    # if a character vector is supplied use these targets
     "character" = target.subset,
+    # if no target.subset was specified we simply take all available targets
     "NULL" = colnames(expr),
     NULL
   )
 
+  # here we build the model for each target
+  # See models.R for details how it works
   message("\nTraining models")
+  
   targets %>% furrr::future_map_chr(function(target, ...) {
     target.model <- build_model(
       views, target, bypass.intra,
       seed, cv.folds, cached, ...
     )
 
+    # After building and training the model, we basically need to extract
+    # all the interesting information/data
     combined.views <- target.model[["meta.model"]]
 
     model.summary <- summary(combined.views)
