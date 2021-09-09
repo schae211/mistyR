@@ -80,8 +80,8 @@ build_model <- function(views, target, bypass.intra = FALSE, seed = 42,
         # transformed data will simply be the target vector with .novar = 0
         if ((view[["abbrev"]] == "intra") & bypass.intra) {
           transformed.view.data <-
-            # Why do we assign the zero variance here?
-            tibble::tibble(!!target := target.vector, .novar := 0)
+          # Why do we assign the zero variance here?
+          tibble::tibble(!!target := target.vector, ".novar" = 0)
           # decomposing the above command
           # We want to create a new tibble where the first column is named according to the target
           # If we would write target = target.vector, the column would literally be named target
