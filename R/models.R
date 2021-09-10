@@ -81,6 +81,8 @@ build_model <- function(views, target, bypass.intra = FALSE, seed = 42,
         if ((view[["abbrev"]] == "intra") & bypass.intra) {
           transformed.view.data <-
           # Why do we assign the zero variance here?
+          # As we are training the RF model below, we need at least
+          # 1 covariate and therefore we are adding this 0 here
           tibble::tibble(!!target := target.vector, ".novar" = 0)
           # decomposing the above command
           # We want to create a new tibble where the first column is named according to the target
