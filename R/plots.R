@@ -316,7 +316,10 @@ plot_contrast_heatmap <- function(misty.results, from.view, to.view,
     dplyr::slice(which(masked %>% rowSums(na.rm = TRUE) > 0)) %>%
     dplyr::select(which(masked %>% colSums(na.rm = TRUE) > 0)) %>%
     tibble::rownames_to_column("Predictor") %>%
+    # For pivot longer use everything but the column named Predictor
     tidyr::pivot_longer(names_to = "Target", values_to = "Importance", -.data$Predictor)
+    # Alternative implementation would be
+    tidyr::pivot_longer(names_to = "Target", values_to = "Importance", cols=!(.data$Predictor))
 
   set2.blue <- "#8DA0CB"
 

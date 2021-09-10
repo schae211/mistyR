@@ -110,6 +110,7 @@ run_misty <- function(views, results.folder = "results", seed = 42,
   # Bypass intra was implemented if we do not want to include the intramodel,
   # which could be the case if we only have a single target in a cell
   # (thus there would be no predictors left).
+  # but would this have to be ncol???
   if(nrow(expr) == 1) bypass.intra <- TRUE
   
   # Get the standard deviation for each target
