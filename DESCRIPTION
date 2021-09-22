@@ -38,7 +38,7 @@ Encoding: UTF-8
 VignetteBuilder: knitr
 Imports: assertthat, caret, deldir, digest, distances, dplyr, filelock, 
     furrr (>= 0.2.0), ggplot2, MASS, purrr, ranger, readr, rlang, rlist, 
-    R.utils, stats, stringr, tibble, tidyr, withr
+    R.utils, stats, stringr, tibble, tidyr, withr, parsnip
 Suggests: BiocStyle, covr, future, igraph, knitr, Matrix, progeny, rmarkdown,
     sctransform, SingleCellExperiment, SpatialExperiment, SummarizedExperiment,
     testthat (>= 3.0.0)

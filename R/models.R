@@ -37,6 +37,20 @@ build_model <- function(views, target, bypass.intra = FALSE, seed = 42,
   # coefficients (meaning genes or whatever else)
   target.vector <- expr %>% dplyr::pull(target)
 
+  
+  do.call(print, arguments)
+  
+  # Specify our random forest implementation
+  rf <- parsnip::rand_forest() %>%
+    do.call(parsnip::set_engine, arguments)
+    parsnip::set_engine("ranger",
+                        importance = "impurity",
+                        seed = seed, 
+                        verbose = FALSE,
+                        num.threads = 1,
+                        num.trees=100) %>%
+    parsnip::set_mode("regression")
+  
   # merge ellipsis with default algorithm arguments
   # See ranger::ranger documentation for these arguments
   algo.arguments <- list(
@@ -96,15 +110,12 @@ build_model <- function(views, target, bypass.intra = FALSE, seed = 42,
             dplyr::mutate(!!target := target.vector)
         }
         
-        # Now we use do.call to evaluate the following expression
-        model.view <- do.call(
-          # Ranger is a random forest implementation
-          ranger::ranger,
-          c(
-            list(data = transformed.view.data),
-            algo.arguments
-          )
-        )
+        # Instead of the old way we will use parsnip now 
+        # (without the elipsis arguments though)
+        model.view <- (rf %>% 
+                         parsnip::fit(as.formula(paste0(target, " ~ .")), 
+                                      data=transformed.view.data))$fit
+        
         if (cached) {
           readr::write_rds(model.view, model.view.cache.file)
         }
