@@ -49,13 +49,13 @@ aggregate_results <- function(improvements, contributions, importances) {
   )
 
   importances.aggregated <- importances %>%
-    tidyr::unite("PT", "Predictor", "Target") %>%
-    dplyr::group_by(.data$view, .data$PT) %>%
+    tidyr::unite(".PT", "Predictor", "Target", sep = "&") %>%
+    dplyr::group_by(.data$view, .data$.PT) %>%
     dplyr::summarise(
       Importance = mean(.data$Importance),
       nsamples = dplyr::n(), .groups = "drop"
     ) %>%
-    tidyr::separate("PT", c("Predictor", "Target"), sep = "[^(\\.|[:alnum:])]+")
+    tidyr::separate(".PT", c("Predictor", "Target"), sep = "&")
 
   return(list(
     improvements.stats = improvements.stats,
@@ -271,13 +271,13 @@ aggregate_results_subset <- function(misty.results, folders) {
   message("Aggregating subset")
   importances.aggregated.subset <- misty.results$importances %>%
     dplyr::filter(.data$sample %in% normalized.folders) %>%
-    tidyr::unite("PT", "Predictor", "Target") %>%
-    dplyr::group_by(.data$view, .data$PT) %>%
+    tidyr::unite(".PT", "Predictor", "Target", sep = "&") %>%
+    dplyr::group_by(.data$view, .data$.PT) %>%
     dplyr::summarise(
       Importance = mean(.data$Importance),
       nsamples = dplyr::n(), .groups = "drop"
     ) %>%
-    tidyr::separate("PT", c("Predictor", "Target"))
+    tidyr::separate(".PT", c("Predictor", "Target"), sep = "&")
 
   misty.results[["importances.aggregated.subset"]] <- importances.aggregated.subset
 
@@ -383,8 +383,13 @@ sweep_cache <- function() {
 extract_signature <- function(misty.results,
                               type = c(
                                 "performance", "contribution", "importance"
-                              ), trim = -Inf, trim.measure = "gain.R2") {
+                              ), trim = -Inf, trim.measure = c(
+                                "gain.R2", "multi.R2", "intra.R2",
+                                "gain.RMSE", "multi.RMSE", "intra.RMSE"
+                              )) {
   signature.type <- match.arg(type)
+
+  trim.measure.type <- match.arg(trim.measure)
 
   assertthat::assert_that(
     all(c(
@@ -395,13 +400,15 @@ extract_signature <- function(misty.results,
     msg = "The provided result list is malformed.
     Consider using collect_results()."
   )
-  
-  inv <- sign((stringr::str_detect(trim.measure, "gain") |
-                 stringr::str_detect(trim.measure, "RMSE", negate = TRUE)) - 0.5)
-  
+
+  inv <- sign((stringr::str_detect(trim.measure.type, "gain") |
+    stringr::str_detect(trim.measure.type, "RMSE", negate = TRUE)) - 0.5)
+
   targets <- misty.results$improvements.stats %>%
-    dplyr::filter(.data$measure == trim.measure, 
-                  inv * .data$mean >= inv * trim) %>%
+    dplyr::filter(
+      .data$measure == trim.measure.type,
+      inv * .data$mean >= inv * trim
+    ) %>%
     dplyr::pull(.data$target)
 
   switch(signature.type,
@@ -410,7 +417,8 @@ extract_signature <- function(misty.results,
         dplyr::group_by(.data$sample) %>%
         dplyr::summarize(ts = list(unique(.data$target))) %>%
         dplyr::pull(.data$ts) %>%
-        purrr::reduce(intersect) %>% intersect(targets)
+        purrr::reduce(intersect) %>%
+        intersect(targets)
 
       misty.results$improvements %>%
         dplyr::filter(
@@ -418,10 +426,10 @@ extract_signature <- function(misty.results,
           stringr::str_ends(.data$measure, "R2"),
           !stringr::str_ends(.data$measure, "p.R2")
         ) %>%
-        tidyr::unite("Feature", .data$target, .data$measure) %>%
+        tidyr::unite(".Feature", .data$target, .data$measure) %>%
         # grouping necessary?
         dplyr::group_by(.data$sample) %>%
-        tidyr::pivot_wider(names_from = "Feature", values_from = "value") %>%
+        tidyr::pivot_wider(names_from = ".Feature", values_from = "value") %>%
         dplyr::ungroup()
     },
     "contribution" = {
@@ -429,7 +437,8 @@ extract_signature <- function(misty.results,
         dplyr::group_by(.data$sample) %>%
         dplyr::summarize(ts = list(unique(.data$target))) %>%
         dplyr::pull(.data$ts) %>%
-        purrr::reduce(intersect) %>% intersect(targets)
+        purrr::reduce(intersect) %>%
+        intersect(targets)
 
       misty.results$contributions %>%
         dplyr::filter(
@@ -439,8 +448,8 @@ extract_signature <- function(misty.results,
         ) %>%
         dplyr::group_by(.data$sample, .data$target) %>%
         dplyr::mutate(frac = abs(.data$value) / sum(abs(.data$value)), value = NULL) %>%
-        tidyr::unite("Feature", .data$view, .data$target) %>%
-        tidyr::pivot_wider(names_from = "Feature", values_from = "frac") %>%
+        tidyr::unite(".Feature", .data$view, .data$target) %>%
+        tidyr::pivot_wider(names_from = ".Feature", values_from = "frac") %>%
         dplyr::ungroup()
     },
     "importance" = {
@@ -456,7 +465,8 @@ extract_signature <- function(misty.results,
             dplyr::group_by(.data$sample) %>%
             dplyr::summarize(ts = list(unique(.data$Target))) %>%
             dplyr::pull(.data$ts) %>%
-            purrr::reduce(intersect) %>% intersect(targets)
+            purrr::reduce(intersect) %>%
+            intersect(targets)
           predictor.intersection <- view.importances %>%
             dplyr::group_by(.data$sample) %>%
             dplyr::summarize(ts = list(unique(.data$Predictor))) %>%
@@ -468,8 +478,8 @@ extract_signature <- function(misty.results,
               .data$Predictor %in% predictor.intersection,
               .data$Target %in% target.intersection
             ) %>%
-            tidyr::unite("vPT", .data$view, .data$Predictor, .data$Target) %>%
-            tidyr::pivot_wider(names_from = "vPT", values_from = "Importance")
+            tidyr::unite(".vPT", .data$view, .data$Predictor, .data$Target) %>%
+            tidyr::pivot_wider(names_from = ".vPT", values_from = "Importance")
         }) %>%
         purrr::reduce(dplyr::full_join, by = "sample")
     }
